@@ -1,9 +1,11 @@
-package counterv2
+package counterSeq
 
 import (
 	"encoding/json"
 	"log"
+	"math/rand"
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -32,7 +34,11 @@ func CbFlush(m *map[string]int) {
 		log.Fatalf(err.Error())
 	}
 	defer f.Close()
-
+	// callTimes := 0
+	// for _, v := range *m {
+	// 	callTimes += v
+	// }
+	// fmt.Printf("write and read %d times in 1s\n", callTimes)
 	// Flush the old and empty
 	buf, err := json.Marshal(m)
 	if err != nil {
@@ -42,6 +48,10 @@ func CbFlush(m *map[string]int) {
 	if err != nil {
 		log.Fatalf(err.Error())
 	}
+}
+
+func Flush2Null(m *map[string]int) {
+
 }
 
 func (c *Counter) Init() {
@@ -101,4 +111,33 @@ func (c *Counter) Get(key string) (int, bool) {
 	case <-c.retNone:
 		return -1, false
 	}
+}
+
+func TestCounterSeq() {
+	// fmt.Println("In CounterS:")
+	cnter := Counter{}
+	cnter.Init()
+	// wp := sync.WaitGroup{}
+	thread := 5
+	// wp.Add(thread)
+	runtime.GOMAXPROCS(thread + 1)
+
+	for j := 0; j < thread; j++ {
+		go func(incKey, getKey string) {
+			for i := 1; i <= 100000000; i++ {
+				// time.Sleep(time.Millisecond * 20)
+				cnter.Incr(incKey, 1)
+				cnter.Get(getKey)
+			}
+			// wp.Done()
+		}(string(byte(rand.Uint32()%256)), string(byte(rand.Uint32()%256)))
+	}
+
+	go func() {
+		cnter.Flush2Broker(time.Second*1, Flush2Null)
+		// wp.Done()
+	}()
+	// wp.Wait()
+	ticker := time.After(time.Millisecond * 5100)
+	<-ticker
 }

@@ -1,9 +1,11 @@
-package counterv5
+package counterRW
 
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +27,13 @@ type Counter struct {
 	flush  chan func(*[]sync.Map)
 }
 
+func Flush2Null(m *[]sync.Map) {
+
+}
+
 func CbFlush(m *[]sync.Map) {
+
+	// flush into file instead of broker
 	timestamp := strconv.Itoa(int(time.Now().Unix()))
 	f, err := os.OpenFile("./cache_"+timestamp, os.O_CREATE|os.O_RDWR, 0755)
 	if err != nil {
@@ -62,6 +70,7 @@ func (c *Counter) Init() {
 	}
 	c.flush = make(chan func(*[]sync.Map))
 
+	// Async: Goroutine for Incr queue
 	for i := range c.caches {
 		k := i
 		go func(j int) {
@@ -73,7 +82,7 @@ func (c *Counter) Init() {
 			}
 		}(k)
 	}
-
+	// Async: Goroutine for Flush
 	go func() {
 		for {
 			flushfunc := <-c.flush
@@ -83,9 +92,7 @@ func (c *Counter) Init() {
 			mux.Unlock()
 			go flushfunc(&bk)
 		}
-
 	}()
-
 }
 
 func (c *Counter) Incr(key string, inc int) {
@@ -103,10 +110,40 @@ func (c *Counter) Flush2Broker(interval time.Duration, FuncCbFlush func(m *[]syn
 	}
 }
 
+// sync.Map assures concurrent-safe for reading
 func (c *Counter) Get(key string) (int, bool) {
 	if value, ok := c.caches[int(key[0]%5)].Load(key); ok {
 		return value.(int), ok
 	} else {
 		return -1, ok
 	}
+}
+
+func TestCounterRW() {
+	fmt.Println("In CounterO:")
+	cnter := Counter{}
+	cnter.Init()
+	// wp := sync.WaitGroup{}
+	thread := 5
+	// wp.Add(thread)
+	runtime.GOMAXPROCS(thread + 1)
+
+	for j := 0; j < thread; j++ {
+		go func(incKey, getKey string) {
+			for i := 1; i <= 100000000; i++ {
+				// time.Sleep(time.Millisecond * 20)
+				cnter.Incr(incKey, 1)
+				cnter.Get(getKey)
+			}
+			// wp.Done()
+		}(string(byte(rand.Uint32()%256)), string(byte(rand.Uint32()%256)))
+	}
+
+	go func() {
+		cnter.Flush2Broker(time.Second*1, Flush2Null)
+		// wp.Done()
+	}()
+	// wp.Wait()
+	ticker := time.After(time.Millisecond * 5100)
+	<-ticker
 }
